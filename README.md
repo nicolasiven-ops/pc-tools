@@ -4,7 +4,7 @@ Kleine Windows-App mit ein paar praktischen PC-Steuerungen.
 
 ## Funktionen
 
-- **Ausschalt-Timer** — fährt den PC nach einer einstellbaren Zeit herunter (Schnellwahl 15/30/60/90 Min oder freie Eingabe, jederzeit abbrechbar).
+- **Ausschalt-Timer** — fährt den PC nach einer einstellbaren Zeit herunter (Schnellwahl 30 Min / 1 / 2 / 3 h, Standard 2 h, ±15-Min-Feinjustierung, Live-Anzeige „Aus um HH:MM Uhr“, jederzeit abbrechbar).
 - **Bildschirm abdunkeln** — macht alle Monitore schwarz, bis du klickst oder eine Taste drückst.
 
 ## Download
