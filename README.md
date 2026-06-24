@@ -6,13 +6,14 @@ Kleine Windows-App mit ein paar praktischen PC-Steuerungen.
 
 - **Ausschalt-Timer** — fährt den PC nach einer einstellbaren Zeit herunter (Schnellwahl 30 Min / 1 / 2 / 3 h, Standard 2 h, ±15-Min-Feinjustierung, Live-Anzeige „Aus um HH:MM Uhr“, jederzeit abbrechbar).
 - **Bildschirm abdunkeln** — macht alle Monitore schwarz, bis du klickst oder eine Taste drückst.
+- **LoL Auto-Pick** — nimmt in League of Legends die Queue an, pickt automatisch deinen bevorzugten Champion (5er-Prioritätsliste) und benachrichtigt dich beim Spielstart. Eigenes Tool im Ordner [`lol-autopick/`](lol-autopick/README.md) — Details und ToS-Hinweis dort.
 
 ## Download
 
 Die fertige `.exe` wird bei jedem Push automatisch von GitHub gebaut:
 
 1. Auf der Repo-Seite rechts auf **Releases** klicken (Eintrag „Neueste Version“).
-2. `PC-Tools.exe` herunterladen.
+2. `PC-Tools.exe` (bzw. `LoL-AutoPick.exe`) herunterladen.
 3. Doppelklick zum Starten — keine Installation nötig.
 
 > **Windows-Hinweis:** Beim ersten Start meldet sich evtl. „Windows hat Ihren PC geschützt“ (SmartScreen), weil die `.exe` nicht signiert ist. Auf **Weitere Informationen → Trotzdem ausführen** klicken. Das ist bei selbstgebauten Tools normal.

@@ -19,20 +19,29 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          pip install -r lol-autopick/requirements.txt
 
-      - name: Build executable
+      - name: Build PC Tools
         run: pyinstaller --onefile --noconsole --name PC-Tools pc_tools.py
 
-      - name: Upload build artifact
+      - name: Build LoL Auto-Pick
+        run: pyinstaller --onefile --noconsole --name LoL-AutoPick --paths lol-autopick lol-autopick/app.py
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: PC-Tools
-          path: dist/PC-Tools.exe
+          name: executables
+          path: |
+            dist/PC-Tools.exe
+            dist/LoL-AutoPick.exe
 
       - name: Publish to "latest" release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
           name: Neueste Version
-          files: dist/PC-Tools.exe
+          files: |
+            dist/PC-Tools.exe
+            dist/LoL-AutoPick.exe
