@@ -24,10 +24,10 @@ jobs:
           pip install -r lol-autopick/requirements.txt
 
       - name: Build PC Tools
-        run: pyinstaller --onefile --noconsole --name PC-Tools pc_tools.py
+        run: pyinstaller --onefile --noconsole --icon pc-tools.ico --name PC-Tools pc_tools.py
 
       - name: Build LoL Auto-Pick
-        run: pyinstaller --onefile --noconsole --name LoL-AutoPick --paths lol-autopick lol-autopick/app.py
+        run: pyinstaller --onefile --noconsole --icon lol-autopick/lol-autopick.ico --name LoL-AutoPick --paths lol-autopick lol-autopick/app.py
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
