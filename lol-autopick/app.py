@@ -42,6 +42,8 @@ PANEL = "#0F1E2E"
 ROW = "#13283A"
 HOVER = "#1B3B52"
 BORDER = "#1E3543"
+SEARCH_BG = "#1C3145"
+OFF_TRACK = "#2A3A4D"
 GOLD = "#C8AA6E"
 GOLD_DIM = "#7A6740"
 TEXT = "#F0E6D2"
@@ -94,6 +96,48 @@ def build_theme(root):
     style.configure("Vertical.TScrollbar", background=ROW, troughcolor=PANEL,
                     bordercolor=PANEL, arrowcolor=MUTED)
     return style
+
+
+class Switch(tk.Frame):
+    """A small rounded on/off toggle with a label, drawn on a canvas."""
+
+    W, H = 46, 24
+
+    def __init__(self, master, text, value=True, command=None):
+        super().__init__(master, bg=WIN_BG)
+        self._value = bool(value)
+        self._command = command
+        self.canvas = tk.Canvas(self, width=self.W, height=self.H, bg=WIN_BG,
+                                highlightthickness=0, cursor="hand2")
+        self.canvas.pack(side="left")
+        self.label = tk.Label(self, text=text, bg=WIN_BG, fg=TEXT,
+                              font=("Segoe UI", 10), cursor="hand2")
+        self.label.pack(side="left", padx=(10, 0))
+        for w in (self.canvas, self.label):
+            w.bind("<Button-1>", self._toggle)
+        self._draw()
+
+    @property
+    def value(self):
+        return self._value
+
+    def _toggle(self, _event=None):
+        self._value = not self._value
+        self._draw()
+        if self._command:
+            self._command(self._value)
+
+    def _pill(self, x1, y1, x2, y2, color):
+        r = (y2 - y1) / 2
+        self.canvas.create_oval(x1, y1, x1 + 2 * r, y2, fill=color, outline="")
+        self.canvas.create_oval(x2 - 2 * r, y1, x2, y2, fill=color, outline="")
+        self.canvas.create_rectangle(x1 + r, y1, x2 - r, y2, fill=color, outline="")
+
+    def _draw(self):
+        self.canvas.delete("all")
+        self._pill(2, 4, self.W - 2, self.H - 4, GOLD if self._value else OFF_TRACK)
+        kx = self.W - 13 if self._value else 13
+        self.canvas.create_oval(kx - 8, 4, kx + 8, self.H - 4, fill=TEXT, outline="")
 
 
 class AutoPickApp:
@@ -184,10 +228,20 @@ class AutoPickApp:
                                   command=lambda: self._set_target("ban"))
         self.seg_ban.pack(side="left")
 
-        entry = ttk.Entry(card, textvariable=self.search_var, style="Search.TEntry")
-        entry.pack(fill="x", pady=(10, 8))
-        entry.insert(0, "")
+        ttk.Label(card, text="Tippen zum Suchen · klicken zum Hinzufügen",
+                  style="Muted.TLabel").pack(anchor="w", pady=(8, 4))
+        search = tk.Frame(card, bg=SEARCH_BG, highlightthickness=1,
+                          highlightbackground=GOLD_DIM, highlightcolor=GOLD)
+        search.pack(fill="x", pady=(0, 8))
+        tk.Label(search, text="🔎", bg=SEARCH_BG, fg=GOLD,
+                 font=("Segoe UI", 11)).pack(side="left", padx=(8, 2))
+        entry = tk.Entry(search, textvariable=self.search_var, bd=0, relief="flat",
+                         bg=SEARCH_BG, fg=TEXT, insertbackground=GOLD,
+                         font=("Segoe UI", 12))
+        entry.pack(side="left", fill="x", expand=True, ipady=7, padx=(2, 8))
+        self.search_entry = entry
         self.search_var.trace_add("write", lambda *_: self._render_results())
+        self.root.after(150, entry.focus_set)      # ready to type right away
 
         # Scrollable results.
         wrap = tk.Frame(card, bg=PANEL)
@@ -232,14 +286,16 @@ class AutoPickApp:
 
         opts = ttk.Frame(footer, style="Win.TFrame")
         opts.pack(side="left", anchor="w")
-        self.acc_var = tk.BooleanVar(value=self.pending.get("auto_accept", True))
-        self.ban_var = tk.BooleanVar(value=self.pending.get("auto_ban", True))
-        self.auto_accept_on = self.acc_var.get()
-        self.auto_ban_on = self.ban_var.get()
-        ttk.Checkbutton(opts, text="Queue automatisch annehmen", variable=self.acc_var,
-                        command=self._sync_opts).pack(anchor="w")
-        ttk.Checkbutton(opts, text="Automatisch bannen", variable=self.ban_var,
-                        command=self._sync_opts).pack(anchor="w")
+        self.acc_switch = Switch(opts, "Queue automatisch annehmen",
+                                 value=self.pending.get("auto_accept", True),
+                                 command=lambda v: self._set_opt("acc", v))
+        self.acc_switch.pack(anchor="w", pady=3)
+        self.ban_switch = Switch(opts, "Automatisch bannen",
+                                 value=self.pending.get("auto_ban", True),
+                                 command=lambda v: self._set_opt("ban", v))
+        self.ban_switch.pack(anchor="w", pady=3)
+        self.auto_accept_on = self.acc_switch.value
+        self.auto_ban_on = self.ban_switch.value
 
         right = ttk.Frame(footer, style="Win.TFrame")
         right.pack(side="right", anchor="e")
@@ -306,13 +362,11 @@ class AutoPickApp:
                                         c["name"]))
         else:
             matches = self.champs
-        shown = matches[:60]
-        for c in shown:
+        for c in matches:
             self._result_row(c)
-        if len(matches) > len(shown):
-            tk.Label(self.results_inner,
-                     text=f"… {len(matches) - len(shown)} weitere – weiter tippen",
-                     bg=PANEL, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", pady=6)
+        if not matches:
+            tk.Label(self.results_inner, text="Kein Treffer.", bg=PANEL, fg=MUTED,
+                     font=("Segoe UI", 10)).pack(anchor="w", pady=8)
 
     def _result_row(self, champ):
         cid = champ["id"]
@@ -412,9 +466,11 @@ class AutoPickApp:
             self._render_lists()
             self._save_config()
 
-    def _sync_opts(self):
-        self.auto_accept_on = self.acc_var.get()
-        self.auto_ban_on = self.ban_var.get()
+    def _set_opt(self, which, value):
+        if which == "acc":
+            self.auto_accept_on = value
+        else:
+            self.auto_ban_on = value
         self._save_config()
 
     def _toggle_armed(self):
@@ -651,8 +707,14 @@ class AutoPickApp:
 
         # --- Auto-ban (only on our turn) ---------------------------------- #
         if self.auto_ban_on and ban and ban_ids:
-            bannable = lcu.bannable_champion_ids()
-            target = next((c for c in ban_ids if c in bannable
+            banned = {a["championId"] for a in actions
+                      if a.get("type") == "ban" and a.get("completed")
+                      and a.get("championId")}
+            bans_info = session.get("bans") or {}
+            banned |= set(bans_info.get("myTeamBans") or [])
+            banned |= set(bans_info.get("theirTeamBans") or [])
+            banned.discard(0)
+            target = next((c for c in ban_ids if c not in banned
                            and c not in pick_ids and c not in ally_intents), None)
             if target:
                 if lcu.complete_action(ban["id"], target).ok:
