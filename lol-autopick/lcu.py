@@ -73,6 +73,8 @@ class LCU:
     """Thin wrapper around the local League client REST API."""
 
     def __init__(self, port, token):
+        self.port = port
+        self.token = token
         self.base = f"https://127.0.0.1:{port}"
         self.session = requests.Session()
         self.session.auth = ("riot", token)       # username is always "riot"
@@ -101,21 +103,16 @@ class LCU:
         r = self.get("/lol-gameflow/v1/gameflow-phase")
         return r.json() if r.ok else None          # endpoint returns a JSON string
 
-    def load_champions(self):
-        """Return (name_to_id, id_to_name, sorted_display_names) for all champions."""
+    def champion_list(self):
+        """Return [{id, name, alias}] for every champion, sorted by name."""
         r = self.get("/lol-game-data/assets/v1/champion-summary.json")
         r.raise_for_status()
-        name_to_id, id_to_name, display = {}, {}, []
-        for champ in r.json():
-            cid = champ.get("id")
-            if cid is None or cid < 0:             # id -1 is the "None" placeholder
-                continue
-            display.append(champ["name"])
-            id_to_name[cid] = champ["name"]
-            for key in (champ.get("name"), champ.get("alias")):
-                if key:                            # match on display name and alias
-                    name_to_id[_normalize(key)] = cid
-        return name_to_id, id_to_name, sorted(display)
+        champs = [
+            {"id": c["id"], "name": c["name"], "alias": c.get("alias", c["name"])}
+            for c in r.json()
+            if c.get("id", -1) >= 0                 # id -1 is the "None" placeholder
+        ]
+        return sorted(champs, key=lambda c: c["name"])
 
     def ready_check(self):
         r = self.get("/lol-matchmaking/v1/ready-check")
@@ -133,6 +130,11 @@ class LCU:
         r = self.get("/lol-champ-select/v1/pickable-champion-ids")
         return set(r.json()) if r.ok else set()
 
+    def bannable_champion_ids(self):
+        """Champions the local player can ban right now (excludes already-banned)."""
+        r = self.get("/lol-champ-select/v1/bannable-champion-ids")
+        return set(r.json()) if r.ok else set()
+
     def hover_champion(self, action_id, champion_id):
         """Declare intent without locking (completed stays false)."""
         return self.patch(
@@ -140,9 +142,14 @@ class LCU:
             json={"championId": champion_id},
         )
 
-    def lock_champion(self, action_id, champion_id):
-        """Lock the champion in for good."""
+    def complete_action(self, action_id, champion_id):
+        """Lock a pick or confirm a ban (sets completed=true)."""
         return self.patch(
             f"/lol-champ-select/v1/session/actions/{action_id}",
             json={"championId": champion_id, "completed": True},
         )
+
+    def champion_icon(self, champion_id):
+        """Return the PNG bytes of a champion's square portrait, or None."""
+        r = self.get(f"/lol-game-data/assets/v1/champion-icons/{champion_id}.png")
+        return r.content if r.ok else None
