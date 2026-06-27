@@ -223,7 +223,7 @@ class AutoPickApp:
     def _build_ui(self):
         self.root.title("LoL Auto-Pick")
         self.root.configure(bg=WIN_BG)
-        self.root.minsize(760, 560)
+        self.root.minsize(820, 640)
 
         # Header.
         header = ttk.Frame(self.root, style="Win.TFrame", padding=(18, 14, 18, 8))
@@ -339,6 +339,10 @@ class AutoPickApp:
                                  value=self.pending.get("auto_ban", True),
                                  command=lambda v: self._set_opt("ban", v))
         self.ban_switch.pack(anchor="w", pady=3)
+        self.autostart_switch = Switch(opts, "Auto-Start (Lobby & Queue)",
+                                       value=self.autostart_enabled,
+                                       command=self._set_autostart_enabled)
+        self.autostart_switch.pack(anchor="w", pady=3)
         self.auto_accept_on = self.acc_switch.value
         self.auto_ban_on = self.ban_switch.value
 
@@ -417,13 +421,10 @@ class AutoPickApp:
                                     value=self.auto_accept_invites,
                                     command=self._set_invites, bg=PANEL)
         self.invite_switch.pack(anchor="w", pady=(12, 2))
-        self.autostart_switch = Switch(start_card, "Beim Start automatisch in die Queue",
-                                       value=self.autostart_enabled,
-                                       command=self._set_autostart_enabled, bg=PANEL)
-        self.autostart_switch.pack(anchor="w", pady=(2, 2))
 
         self.start_status = ttk.Label(
-            start_card, text="Starten über den großen „Start“-Button unten rechts.",
+            start_card, text="Schalter „Auto-Start“ unten links anschalten,\n"
+                             "dann mit dem großen „Start“-Button starten.",
             style="Muted.TLabel", wraplength=300, justify="left")
         self.start_status.pack(anchor="w", pady=(10, 0))
 
@@ -544,8 +545,10 @@ class AutoPickApp:
             else:
                 self.start_status.configure(text="Queue wird gestartet …")
         elif not self.armed.is_set():
+            on = self.autostart_enabled
             self.start_status.configure(
-                text="Starten über den großen „Start“-Button unten rechts.")
+                text=("Auto-Start ist an – mit „Start“ unten starten."
+                      if on else "Auto-Start ist aus (Schalter unten links)."))
         self.root.after(1000, self._tick_start)
 
     # ----------------------------------------------------------- rendering -- #
@@ -963,8 +966,17 @@ class AutoPickApp:
     def _do_autostart(self, lcu):
         qid = self.queue_id
         label = next((l for l, q in QUEUES if q == qid), str(qid))
-        if not lcu.create_lobby(qid).ok:
-            self._post("log", f"Lobby ({label}) fehlgeschlagen.")
+        try:
+            phase = lcu.gameflow_phase()
+        except requests.RequestException:
+            phase = None
+        if phase not in (None, "None", "Lobby"):
+            self._post("log", f"Auto-Start übersprungen (Status: {phase}).")
+            return
+        r = lcu.create_lobby(qid)
+        if not r.ok:
+            self._post("log", f"Lobby ({label}) fehlgeschlagen [{r.status_code}]: "
+                              f"{self._error_detail(r)}{self._queue_hint(lcu, qid)}")
             return
         invite_ids = list(self.invite_ids)
         if invite_ids:
@@ -992,10 +1004,35 @@ class AutoPickApp:
             self._start_search(lcu, wf["label"])
 
     def _start_search(self, lcu, label):
-        if lcu.start_matchmaking().ok:
+        r = lcu.start_matchmaking()
+        if r.ok:
             self._post("log", f"Queue gestartet: {label} ✔")
         else:
-            self._post("log", f"Queue-Start ({label}) fehlgeschlagen.")
+            self._post("log", f"Queue-Start ({label}) fehlgeschlagen "
+                              f"[{r.status_code}]: {self._error_detail(r)}")
+
+    @staticmethod
+    def _error_detail(r):
+        """Pull a short human message out of an LCU error response."""
+        try:
+            j = r.json()
+            if isinstance(j, dict):
+                return str(j.get("message") or j.get("errorCode") or j)[:140]
+        except ValueError:
+            pass
+        return (getattr(r, "text", "") or "")[:140]
+
+    @staticmethod
+    def _queue_hint(lcu, qid):
+        """Look up the queue so the log can say e.g. 'Arena: PlatformDisabled'."""
+        try:
+            q = lcu.get(f"/lol-game-queues/v1/queues/{qid}")
+            if q.ok:
+                j = q.json()
+                return f" | {j.get('name')}: {j.get('queueAvailability')}"
+            return f" | Queue {qid}: HTTP {q.status_code}"
+        except requests.RequestException:
+            return ""
 
     def _champ_select(self, lcu, state):
         session = lcu.champ_select_session()
