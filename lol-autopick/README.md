@@ -28,6 +28,22 @@ Portraits (Live vom Client geladen) – anklicken fügt zur aktiven Liste hinzu
 (umschaltbar zwischen **Picks** und **Bans**). Rechts die beiden Prioritäts­listen,
 deren Einträge sich per ▲▼ umsortieren und mit ✕ entfernen lassen.
 
+## Auto-Start (Tab „Auto-Start")
+
+Bringt dich automatisch in die Queue:
+
+- **Spielmodus** wählen (Normal Draft/Blind, Ranked Solo/Flex, ARAM, Quickplay).
+- **Freunde einladen** (optional) – Auswahl aus der Freundesliste; Online-Status
+  als Punkt, Anklicken (de)selektiert.
+- **Timer**: sofort, in X Minuten oder um eine Uhrzeit (HH:MM) – mit Countdown.
+- **Eingehende Einladungen automatisch annehmen** – zieht dich in die Lobby eines
+  Freundes, ohne dass du klicken musst.
+
+Beim Auslösen erstellt das Tool die Lobby, lädt die gewählten Freunde ein und
+startet das Matchmaking. Das eigentliche Annehmen des Ready-Checks danach
+übernimmt – wie bisher – die Champ-Select-Automatik (Schalter „Queue automatisch
+annehmen", Tool per **Start** scharfstellen).
+
 ## Funktionsweise (kurz)
 
 Der League-Client betreibt lokal eine REST-API auf `127.0.0.1` – dieselbe, die

@@ -97,6 +97,9 @@ class LCU:
     def patch(self, path, json=None):
         return self.session.patch(self.base + path, json=json, timeout=5)
 
+    def delete(self, path):
+        return self.session.delete(self.base + path, timeout=5)
+
     # --- high-level helpers ------------------------------------------------ #
     def gameflow_phase(self):
         """Current phase, e.g. 'Lobby', 'ReadyCheck', 'ChampSelect', 'InProgress'."""
@@ -153,3 +156,35 @@ class LCU:
         """Return the PNG bytes of a champion's square portrait, or None."""
         r = self.get(f"/lol-game-data/assets/v1/champion-icons/{champion_id}.png")
         return r.content if r.ok else None
+
+    # --- lobby / matchmaking (auto-start) ---------------------------------- #
+    def lobby(self):
+        r = self.get("/lol-lobby/v2/lobby")
+        return r.json() if r.ok else None
+
+    def create_lobby(self, queue_id):
+        """Open (or switch to) a lobby for the given queue id."""
+        return self.post("/lol-lobby/v2/lobby", json={"queueId": queue_id})
+
+    def start_matchmaking(self):
+        return self.post("/lol-lobby/v2/lobby/matchmaking/search")
+
+    def stop_matchmaking(self):
+        return self.delete("/lol-lobby/v2/lobby/matchmaking/search")
+
+    def friends(self):
+        """Friends list; entries carry summonerId, name/gameName and availability."""
+        r = self.get("/lol-chat/v1/friends")
+        return r.json() if r.ok else []
+
+    def invite(self, summoner_ids):
+        body = [{"toSummonerId": sid} for sid in summoner_ids]
+        return self.post("/lol-lobby/v2/lobby/invitations", json=body)
+
+    def received_invitations(self):
+        r = self.get("/lol-lobby/v2/received-invitations")
+        return r.json() if r.ok else []
+
+    def accept_invitation(self, invitation_id):
+        return self.post(
+            f"/lol-lobby/v2/received-invitations/{invitation_id}/accept")

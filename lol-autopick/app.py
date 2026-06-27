@@ -21,6 +21,7 @@ import io
 import json
 import queue
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
@@ -35,6 +36,16 @@ MAX_BANS = 3
 POLL_SECONDS = 1.0
 THUMB = 34
 CONFIG_PATH = Path.home() / ".lol_autopick.json"
+
+# Game modes offered by the Auto-Start tab: (label, queueId).
+QUEUES = [
+    ("Normal Draft", 400),
+    ("Blind Pick", 430),
+    ("Ranked Solo/Duo", 420),
+    ("Ranked Flex", 440),
+    ("ARAM", 450),
+    ("Quickplay", 490),
+]
 
 # --- Hextech-ish dark palette --------------------------------------------- #
 WIN_BG = "#0A1428"
@@ -95,6 +106,16 @@ def build_theme(root):
 
     style.configure("Vertical.TScrollbar", background=ROW, troughcolor=PANEL,
                     bordercolor=PANEL, arrowcolor=MUTED)
+
+    style.configure("TNotebook", background=WIN_BG, borderwidth=0, tabmargins=(8, 6, 8, 0))
+    style.configure("TNotebook.Tab", background=PANEL, foreground=MUTED,
+                    padding=(18, 8), font=("Segoe UI Semibold", 10), borderwidth=0)
+    style.map("TNotebook.Tab", background=[("selected", WIN_BG)],
+              foreground=[("selected", GOLD)])
+
+    style.configure("TRadiobutton", background=PANEL, foreground=TEXT)
+    style.map("TRadiobutton", background=[("active", PANEL)],
+              foreground=[("active", GOLD)])
     return style
 
 
@@ -103,14 +124,15 @@ class Switch(tk.Frame):
 
     W, H = 46, 24
 
-    def __init__(self, master, text, value=True, command=None):
-        super().__init__(master, bg=WIN_BG)
+    def __init__(self, master, text, value=True, command=None, bg=WIN_BG):
+        super().__init__(master, bg=bg)
         self._value = bool(value)
         self._command = command
-        self.canvas = tk.Canvas(self, width=self.W, height=self.H, bg=WIN_BG,
+        self._bg = bg
+        self.canvas = tk.Canvas(self, width=self.W, height=self.H, bg=bg,
                                 highlightthickness=0, cursor="hand2")
         self.canvas.pack(side="left")
-        self.label = tk.Label(self, text=text, bg=WIN_BG, fg=TEXT,
+        self.label = tk.Label(self, text=text, bg=bg, fg=TEXT,
                               font=("Segoe UI", 10), cursor="hand2")
         self.label.pack(side="left", padx=(10, 0))
         for w in (self.canvas, self.label):
@@ -171,6 +193,14 @@ class AutoPickApp:
 
         self.pending = self._load_config()
 
+        # Auto-start state (read by the service thread).
+        self.queue_id = self.pending.get("queue_id", 400)
+        self.invite_ids = set()
+        self.friends = []
+        self.friend_rows = {}              # summonerId -> row widget
+        self.auto_accept_invites = bool(self.pending.get("auto_accept_invites", False))
+        self.start_at = None               # epoch time of a scheduled queue start
+
         build_theme(root)
         self.placeholder = self._make_placeholder()
         self._build_ui()
@@ -181,6 +211,7 @@ class AutoPickApp:
         threading.Thread(target=self._service, daemon=True).start()
         threading.Thread(target=self._icon_worker, daemon=True).start()
         self._drain_events()
+        self._tick_start()
 
     # ------------------------------------------------------------------ UI -- #
     def _build_ui(self):
@@ -197,14 +228,22 @@ class AutoPickApp:
         self.pill = ttk.Label(header, text="getrennt", style="Pill.TLabel")
         self.pill.pack(side="right")
 
-        body = ttk.Frame(self.root, style="Win.TFrame", padding=(18, 6, 18, 6))
-        body.pack(fill="both", expand=True)
-        body.columnconfigure(0, weight=1, uniform="col")
-        body.columnconfigure(1, weight=1, uniform="col")
-        body.rowconfigure(0, weight=1)
+        nb = ttk.Notebook(self.root)
+        self.nb = nb
+        nb.pack(fill="both", expand=True, padx=10, pady=(2, 0))
 
-        self._build_picker(body)
-        self._build_lists(body)
+        tab_pick = ttk.Frame(nb, style="Win.TFrame", padding=(8, 10, 8, 8))
+        nb.add(tab_pick, text="Pick & Ban")
+        tab_pick.columnconfigure(0, weight=1, uniform="col")
+        tab_pick.columnconfigure(1, weight=1, uniform="col")
+        tab_pick.rowconfigure(0, weight=1)
+        self._build_picker(tab_pick)
+        self._build_lists(tab_pick)
+
+        tab_auto = ttk.Frame(nb, style="Win.TFrame", padding=(8, 10, 8, 8))
+        nb.add(tab_auto, text="Auto-Start")
+        self._build_autostart(tab_auto)
+
         self._build_footer()
 
     def _card(self, parent, title):
@@ -304,6 +343,197 @@ class AutoPickApp:
         self.start_btn = ttk.Button(right, text="Start", style="Start.TButton",
                                     command=self._toggle_armed)
         self.start_btn.pack(anchor="e")
+
+    # -------------------------------------------------------- auto-start UI -- #
+    def _build_autostart(self, parent):
+        parent.columnconfigure(0, weight=1, uniform="a")
+        parent.columnconfigure(1, weight=1, uniform="a")
+        parent.rowconfigure(1, weight=1)
+
+        # Game mode chips.
+        mode_card, _ = self._card(parent, "Spielmodus")
+        mode_card.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        chips = ttk.Frame(mode_card, style="Panel.TFrame")
+        chips.pack(fill="x", pady=(10, 2))
+        for i in range(3):
+            chips.columnconfigure(i, weight=1)
+        self.queue_btns = {}
+        for i, (label, qid) in enumerate(QUEUES):
+            b = ttk.Button(chips, text=label, style="Seg.TButton",
+                           command=lambda q=qid: self._select_queue(q))
+            b.grid(row=i // 3, column=i % 3, sticky="ew", padx=4, pady=4)
+            self.queue_btns[qid] = b
+        self._select_queue(self.queue_id)
+
+        # Friends to invite.
+        fr_card, _ = self._card(parent, "Freunde einladen (optional)")
+        fr_card.grid(row=1, column=0, sticky="nsew", padx=(0, 8))
+        wrap = tk.Frame(fr_card, bg=PANEL)
+        wrap.pack(fill="both", expand=True, pady=(10, 0))
+        self.friends_canvas = tk.Canvas(wrap, bg=PANEL, highlightthickness=0, height=170)
+        sb = ttk.Scrollbar(wrap, orient="vertical", command=self.friends_canvas.yview)
+        self.friends_inner = tk.Frame(self.friends_canvas, bg=PANEL)
+        fid = self.friends_canvas.create_window((0, 0), window=self.friends_inner,
+                                                anchor="nw")
+        self.friends_canvas.configure(yscrollcommand=sb.set)
+        self.friends_canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.friends_inner.bind("<Configure>", lambda e: self.friends_canvas.configure(
+            scrollregion=self.friends_canvas.bbox("all")))
+        self.friends_canvas.bind("<Configure>", lambda e: self.friends_canvas.itemconfigure(
+            fid, width=e.width))
+        self._bind_wheel(self.friends_canvas)
+        self._render_friends()
+
+        # Timer + start.
+        start_card, _ = self._card(parent, "Start")
+        start_card.grid(row=1, column=1, sticky="nsew")
+        self.timer_mode = tk.StringVar(value="now")
+        self.in_min_var = tk.StringVar(value="10")
+        self.at_time_var = tk.StringVar(value="20:00")
+
+        ttk.Radiobutton(start_card, text="Sofort starten", value="now",
+                        variable=self.timer_mode).pack(anchor="w", pady=(10, 2))
+        r2 = ttk.Frame(start_card, style="Panel.TFrame")
+        r2.pack(anchor="w", fill="x", pady=2)
+        ttk.Radiobutton(r2, text="In", value="in", variable=self.timer_mode).pack(side="left")
+        tk.Entry(r2, textvariable=self.in_min_var, width=5, bd=0, bg=SEARCH_BG, fg=TEXT,
+                 insertbackground=GOLD, justify="center").pack(side="left", padx=6, ipady=2)
+        ttk.Label(r2, text="Minuten", style="Panel.TLabel").pack(side="left")
+        r3 = ttk.Frame(start_card, style="Panel.TFrame")
+        r3.pack(anchor="w", fill="x", pady=2)
+        ttk.Radiobutton(r3, text="Um", value="at", variable=self.timer_mode).pack(side="left")
+        tk.Entry(r3, textvariable=self.at_time_var, width=7, bd=0, bg=SEARCH_BG, fg=TEXT,
+                 insertbackground=GOLD, justify="center").pack(side="left", padx=6, ipady=2)
+        ttk.Label(r3, text="Uhr (HH:MM)", style="Panel.TLabel").pack(side="left")
+
+        self.invite_switch = Switch(start_card, "Eingehende Einladungen annehmen",
+                                    value=self.auto_accept_invites,
+                                    command=self._set_invites, bg=PANEL)
+        self.invite_switch.pack(anchor="w", pady=(12, 2))
+
+        btns = ttk.Frame(start_card, style="Panel.TFrame")
+        btns.pack(anchor="w", fill="x", pady=(8, 0))
+        ttk.Button(btns, text="Queue starten", style="Start.TButton",
+                   command=self._schedule_start).pack(side="left")
+        ttk.Button(btns, text="Abbrechen", style="Seg.TButton",
+                   command=self._cancel_start).pack(side="left", padx=(8, 0))
+        self.start_status = ttk.Label(start_card, text="", style="Muted.TLabel")
+        self.start_status.pack(anchor="w", pady=(8, 0))
+
+    def _select_queue(self, qid):
+        self.queue_id = qid
+        for q, b in self.queue_btns.items():
+            b.configure(style="SegOn.TButton" if q == qid else "Seg.TButton")
+        self._save_config()
+
+    def _set_invites(self, value):
+        self.auto_accept_invites = value
+        self._save_config()
+
+    def _on_friends(self, friends):
+        usable = [f for f in friends if f.get("summonerId")]
+        order = {"chat": 0, "away": 1, "mobile": 2, "dnd": 3, "offline": 9}
+        usable.sort(key=lambda f: (order.get(f.get("availability"), 5),
+                                   (f.get("gameName") or f.get("name") or "").lower()))
+        self.friends = usable
+        self._render_friends()
+
+    def _render_friends(self):
+        for w in self.friends_inner.winfo_children():
+            w.destroy()
+        self.friend_rows = {}
+        if not self.friends:
+            tk.Label(self.friends_inner,
+                     text="Keine Freunde geladen.\nMit dem Client verbinden …",
+                     bg=PANEL, fg=MUTED, font=("Segoe UI", 9), justify="left").pack(
+                anchor="w", pady=6)
+            return
+        for f in self.friends:
+            self._friend_row(f)
+
+    def _friend_row(self, f):
+        sid = f.get("summonerId")
+        name = f.get("gameName") or f.get("name") or str(sid)
+        online = f.get("availability") in ("chat", "away", "dnd", "mobile")
+        sel = sid in self.invite_ids
+        bg = ROW if sel else PANEL
+        row = tk.Frame(self.friends_inner, bg=bg, cursor="hand2")
+        row.pack(fill="x", pady=1)
+        dot = tk.Label(row, text="●", bg=bg, fg=(TEAL if online else MUTED),
+                       font=("Segoe UI", 9))
+        dot.pack(side="left", padx=(6, 6))
+        lbl = tk.Label(row, text=name, bg=bg, fg=TEXT, anchor="w", font=("Segoe UI", 10))
+        lbl.pack(side="left", fill="x", expand=True)
+        check = tk.Label(row, text="✓" if sel else "", bg=bg, fg=GOLD, width=2,
+                         font=("Segoe UI Semibold", 11))
+        check.pack(side="right", padx=6)
+        self.friend_rows[sid] = (row, dot, lbl, check)
+        for w in (row, dot, lbl, check):
+            w.bind("<Button-1>", lambda _e, s=sid: self._toggle_friend(s))
+
+    def _toggle_friend(self, sid):
+        if sid in self.invite_ids:
+            self.invite_ids.discard(sid)
+        else:
+            self.invite_ids.add(sid)
+        sel = sid in self.invite_ids
+        widgets = self.friend_rows.get(sid)
+        if widgets:
+            bg = ROW if sel else PANEL
+            for w in widgets:
+                try:
+                    w.configure(bg=bg)
+                except tk.TclError:
+                    pass
+            widgets[3].configure(text="✓" if sel else "")
+
+    def _parse_hhmm(self, text):
+        import datetime
+        try:
+            hh, mm = (int(x) for x in text.strip().split(":"))
+        except (ValueError, TypeError):
+            return None
+        if not (0 <= hh < 24 and 0 <= mm < 60):
+            return None
+        now = datetime.datetime.now()
+        target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        if target <= now:
+            target += datetime.timedelta(days=1)
+        return target.timestamp()
+
+    def _schedule_start(self):
+        mode = self.timer_mode.get()
+        if mode == "now":
+            self.start_at = time.time()
+        elif mode == "in":
+            try:
+                mins = float(self.in_min_var.get().replace(",", "."))
+            except ValueError:
+                self.start_status.configure(text="Ungültige Minutenangabe.")
+                return
+            self.start_at = time.time() + max(0.0, mins) * 60
+        else:
+            ts = self._parse_hhmm(self.at_time_var.get())
+            if ts is None:
+                self.start_status.configure(text="Ungültige Uhrzeit (HH:MM).")
+                return
+            self.start_at = ts
+        self._save_config()
+
+    def _cancel_start(self):
+        self.start_at = None
+        self.start_status.configure(text="Auto-Start abgebrochen.")
+
+    def _tick_start(self):
+        if self.start_at is not None:
+            rem = int(self.start_at - time.time())
+            if rem > 0:
+                self.start_status.configure(
+                    text=f"Queue startet in {rem // 60}:{rem % 60:02d}")
+            else:
+                self.start_status.configure(text="Queue wird gestartet …")
+        self.root.after(1000, self._tick_start)
 
     # ----------------------------------------------------------- rendering -- #
     def _make_placeholder(self):
@@ -509,6 +739,8 @@ class AutoPickApp:
                     self.creds = payload
                 elif kind == "champ_data":
                     self._on_champ_data(payload)
+                elif kind == "friends":
+                    self._on_friends(payload)
                 elif kind == "icon":
                     self._on_icon(payload)
                 elif kind == "notify":
@@ -602,7 +834,9 @@ class AutoPickApp:
             picks = self.pending.get("picks", [])
             bans = self.pending.get("bans", [])
         data = {"picks": picks, "bans": bans,
-                "auto_accept": self.auto_accept_on, "auto_ban": self.auto_ban_on}
+                "auto_accept": self.auto_accept_on, "auto_ban": self.auto_ban_on,
+                "queue_id": self.queue_id,
+                "auto_accept_invites": self.auto_accept_invites}
         self.pending = data
         try:
             CONFIG_PATH.write_text(json.dumps(data, indent=2))
@@ -645,6 +879,10 @@ class AutoPickApp:
                 self.creds = (lcu.port, lcu.token)
                 self._post("creds", (lcu.port, lcu.token))
                 self._post("champ_data", champs)
+                try:
+                    self._post("friends", lcu.friends())
+                except requests.RequestException:
+                    pass
                 self._post("status", ("verbunden", "Verbunden mit dem League-Client."))
                 waiting, last_phase = False, None
 
@@ -678,8 +916,42 @@ class AutoPickApp:
                     lcu, self.creds, last_phase = None, None, None
                     continue
 
+            # Auto-start runs independently of the armed champ-select automation.
+            try:
+                self._auto_start_tick(lcu)
+            except requests.RequestException:
+                lcu, self.creds, last_phase = None, None, None
+                continue
+
             last_phase = phase
             self.closing.wait(POLL_SECONDS)
+
+    def _auto_start_tick(self, lcu):
+        """Accept incoming invitations and fire a scheduled queue start."""
+        if self.auto_accept_invites:
+            for inv in lcu.received_invitations():
+                if inv.get("state") == "Pending":
+                    lcu.accept_invitation(inv.get("invitationId"))
+                    self._post("log", "Einladung angenommen ✔")
+        if self.start_at is not None and time.time() >= self.start_at:
+            self.start_at = None
+            self._do_autostart(lcu)
+
+    def _do_autostart(self, lcu):
+        qid = self.queue_id
+        label = next((l for l, q in QUEUES if q == qid), str(qid))
+        if not lcu.create_lobby(qid).ok:
+            self._post("log", f"Lobby ({label}) fehlgeschlagen.")
+            return
+        invite_ids = list(self.invite_ids)
+        if invite_ids:
+            if lcu.invite(invite_ids).ok:
+                self._post("log", f"{len(invite_ids)} Freund(e) eingeladen")
+            self.closing.wait(0.6)          # let invites register before searching
+        if lcu.start_matchmaking().ok:
+            self._post("log", f"Queue gestartet: {label} ✔")
+        else:
+            self._post("log", f"Queue-Start ({label}) fehlgeschlagen.")
 
     def _champ_select(self, lcu, state):
         session = lcu.champ_select_session()

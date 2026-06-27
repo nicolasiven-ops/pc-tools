@@ -6,7 +6,7 @@ Kleine Windows-App mit ein paar praktischen PC-Steuerungen.
 
 - **Ausschalt-Timer** — fährt den PC nach einer einstellbaren Zeit herunter (Schnellwahl 30 Min / 1 / 2 / 3 h, Standard 2 h, ±15-Min-Feinjustierung, Live-Anzeige „Aus um HH:MM Uhr“, jederzeit abbrechbar).
 - **Bildschirm abdunkeln** — macht alle Monitore schwarz, bis du klickst oder eine Taste drückst.
-- **LoL Auto-Pick** — nimmt in League of Legends die Queue an, pickt automatisch deinen bevorzugten Champion (5er-Prioritätsliste) und benachrichtigt dich beim Spielstart. Eigenes Tool im Ordner [`lol-autopick/`](lol-autopick/README.md) — Details und ToS-Hinweis dort.
+- **LoL Auto-Pick** — League-of-Legends-Helfer: nimmt die Queue an, bannt und pickt automatisch nach Prioritätslisten, kann per Timer eine Lobby öffnen und die Queue starten (Auto-Start) und benachrichtigt dich beim Spielstart. Eigenes Tool im Ordner [`lol-autopick/`](lol-autopick/README.md) — Details und ToS-Hinweis dort.
 
 ## Download
 
