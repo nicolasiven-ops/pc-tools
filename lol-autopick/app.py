@@ -705,15 +705,10 @@ class AutoPickApp:
         pick_ids = list(self.pick_ids)
         ban_ids = list(self.ban_ids)
 
+        banned = self._banned_set(session, actions)
+
         # --- Auto-ban (only on our turn) ---------------------------------- #
         if self.auto_ban_on and ban and ban_ids:
-            banned = {a["championId"] for a in actions
-                      if a.get("type") == "ban" and a.get("completed")
-                      and a.get("championId")}
-            bans_info = session.get("bans") or {}
-            banned |= set(bans_info.get("myTeamBans") or [])
-            banned |= set(bans_info.get("theirTeamBans") or [])
-            banned.discard(0)
             target = next((c for c in ban_ids if c not in banned
                            and c not in pick_ids and c not in ally_intents), None)
             if target:
@@ -726,7 +721,17 @@ class AutoPickApp:
         # --- Pick: pre-hover, then lock on our turn ----------------------- #
         if pick and pick_ids:
             pickable = lcu.pickable_champion_ids()
-            target = next((c for c in pick_ids if c in pickable), None)
+            # Champions another player already locked in are off the table.
+            taken = {a["championId"] for a in actions
+                     if a.get("type") == "pick" and a.get("completed")
+                     and a.get("actorCellId") != my_cell and a.get("championId")}
+            # Exclude the ban set ourselves so a banned #1 always falls through
+            # to #2 — even if pickable-champion-ids still lists the banned champ
+            # (it doesn't reliably drop bans, which would otherwise wedge us
+            # retrying an un-lockable pick).
+            target = next((c for c in pick_ids if c not in banned
+                           and c not in taken
+                           and (not pickable or c in pickable)), None)
             if target is None:
                 if not state["warn_pick"]:
                     self._post("log", "Kein Pick-Champion verfügbar – bitte manuell.")
@@ -738,6 +743,18 @@ class AutoPickApp:
                 if lcu.hover_champion(pick["id"], target).ok:
                     self._post("log", f"{self._name(target)} vorgemerkt")
                     state["hover"] = target
+
+    @staticmethod
+    def _banned_set(session, actions):
+        """Champion ids banned so far: completed ban actions + team ban lists."""
+        banned = {a["championId"] for a in actions
+                  if a.get("type") == "ban" and a.get("completed")
+                  and a.get("championId")}
+        info = session.get("bans") or {}
+        banned |= set(info.get("myTeamBans") or [])
+        banned |= set(info.get("theirTeamBans") or [])
+        banned.discard(0)
+        return banned
 
     def _icon_worker(self):
         icl = None
