@@ -39,6 +39,7 @@ CONFIG_PATH = Path.home() / ".lol_autopick.json"
 
 # Game modes offered by the Auto-Start tab: (label, queueId).
 QUEUES = [
+    ("Arena", 1700),
     ("Normal Draft", 400),
     ("Blind Pick", 430),
     ("Ranked Solo/Duo", 420),
@@ -46,6 +47,9 @@ QUEUES = [
     ("ARAM", 450),
     ("Quickplay", 490),
 ]
+
+# How long to wait for invited friends to join the lobby before starting anyway.
+LOBBY_WAIT_TIMEOUT = 180
 
 # --- Hextech-ish dark palette --------------------------------------------- #
 WIN_BG = "#0A1428"
@@ -199,7 +203,9 @@ class AutoPickApp:
         self.friends = []
         self.friend_rows = {}              # summonerId -> row widget
         self.auto_accept_invites = bool(self.pending.get("auto_accept_invites", False))
+        self.autostart_enabled = bool(self.pending.get("autostart_enabled", True))
         self.start_at = None               # epoch time of a scheduled queue start
+        self.waiting_for = None            # {ids, deadline, label} while awaiting invitees
 
         build_theme(root)
         self.placeholder = self._make_placeholder()
@@ -411,15 +417,15 @@ class AutoPickApp:
                                     value=self.auto_accept_invites,
                                     command=self._set_invites, bg=PANEL)
         self.invite_switch.pack(anchor="w", pady=(12, 2))
+        self.autostart_switch = Switch(start_card, "Beim Start automatisch in die Queue",
+                                       value=self.autostart_enabled,
+                                       command=self._set_autostart_enabled, bg=PANEL)
+        self.autostart_switch.pack(anchor="w", pady=(2, 2))
 
-        btns = ttk.Frame(start_card, style="Panel.TFrame")
-        btns.pack(anchor="w", fill="x", pady=(8, 0))
-        ttk.Button(btns, text="Queue starten", style="Start.TButton",
-                   command=self._schedule_start).pack(side="left")
-        ttk.Button(btns, text="Abbrechen", style="Seg.TButton",
-                   command=self._cancel_start).pack(side="left", padx=(8, 0))
-        self.start_status = ttk.Label(start_card, text="", style="Muted.TLabel")
-        self.start_status.pack(anchor="w", pady=(8, 0))
+        self.start_status = ttk.Label(
+            start_card, text="Starten über den großen „Start“-Button unten rechts.",
+            style="Muted.TLabel", wraplength=300, justify="left")
+        self.start_status.pack(anchor="w", pady=(10, 0))
 
     def _select_queue(self, qid):
         self.queue_id = qid
@@ -502,7 +508,12 @@ class AutoPickApp:
             target += datetime.timedelta(days=1)
         return target.timestamp()
 
+    def _set_autostart_enabled(self, value):
+        self.autostart_enabled = value
+        self._save_config()
+
     def _schedule_start(self):
+        """Set start_at from the timer fields; return True on success."""
         mode = self.timer_mode.get()
         if mode == "now":
             self.start_at = time.time()
@@ -511,28 +522,30 @@ class AutoPickApp:
                 mins = float(self.in_min_var.get().replace(",", "."))
             except ValueError:
                 self.start_status.configure(text="Ungültige Minutenangabe.")
-                return
+                return False
             self.start_at = time.time() + max(0.0, mins) * 60
         else:
             ts = self._parse_hhmm(self.at_time_var.get())
             if ts is None:
                 self.start_status.configure(text="Ungültige Uhrzeit (HH:MM).")
-                return
+                return False
             self.start_at = ts
         self._save_config()
-
-    def _cancel_start(self):
-        self.start_at = None
-        self.start_status.configure(text="Auto-Start abgebrochen.")
+        return True
 
     def _tick_start(self):
-        if self.start_at is not None:
+        if self.waiting_for is not None:
+            self.start_status.configure(text="Warte auf Lobby-Beitritt der Freunde …")
+        elif self.start_at is not None:
             rem = int(self.start_at - time.time())
             if rem > 0:
                 self.start_status.configure(
                     text=f"Queue startet in {rem // 60}:{rem % 60:02d}")
             else:
                 self.start_status.configure(text="Queue wird gestartet …")
+        elif not self.armed.is_set():
+            self.start_status.configure(
+                text="Starten über den großen „Start“-Button unten rechts.")
         self.root.after(1000, self._tick_start)
 
     # ----------------------------------------------------------- rendering -- #
@@ -706,15 +719,22 @@ class AutoPickApp:
     def _toggle_armed(self):
         if self.armed.is_set():
             self.armed.clear()
+            self.start_at = None             # cancel a not-yet-fired queue start
+            self.waiting_for = None
             self.start_btn.configure(text="Start", style="Start.TButton")
             self._set_status("Gestoppt.")
         else:
-            if not self.pick_ids and not self.ban_ids:
-                self._set_status("Erst Champions wählen.")
-                return
             self.armed.set()
             self.start_btn.configure(text="Stopp", style="Stop.TButton")
-            self._set_status("Aktiv – wartet auf Queue/Champ-Select.")
+            # One button: arm the champ-select automation and (optionally) kick
+            # off the Auto-Start queue per the timer settings.
+            if self.autostart_enabled:
+                if self._schedule_start():
+                    self._set_status("Aktiv – Auto-Start läuft.")
+                else:
+                    self._set_status("Aktiv – Auto-Start: Timer prüfen.")
+            else:
+                self._set_status("Aktiv – wartet auf Queue/Champ-Select.")
 
     def _set_status(self, text):
         self.status_lbl.configure(text=text)
@@ -836,7 +856,8 @@ class AutoPickApp:
         data = {"picks": picks, "bans": bans,
                 "auto_accept": self.auto_accept_on, "auto_ban": self.auto_ban_on,
                 "queue_id": self.queue_id,
-                "auto_accept_invites": self.auto_accept_invites}
+                "auto_accept_invites": self.auto_accept_invites,
+                "autostart_enabled": self.autostart_enabled}
         self.pending = data
         try:
             CONFIG_PATH.write_text(json.dumps(data, indent=2))
@@ -927,13 +948,15 @@ class AutoPickApp:
             self.closing.wait(POLL_SECONDS)
 
     def _auto_start_tick(self, lcu):
-        """Accept incoming invitations and fire a scheduled queue start."""
+        """Accept invitations, fire a scheduled start, and await invited friends."""
         if self.auto_accept_invites:
             for inv in lcu.received_invitations():
                 if inv.get("state") == "Pending":
                     lcu.accept_invitation(inv.get("invitationId"))
                     self._post("log", "Einladung angenommen ✔")
-        if self.start_at is not None and time.time() >= self.start_at:
+        if self.waiting_for is not None:
+            self._await_lobby(lcu)
+        elif self.start_at is not None and time.time() >= self.start_at:
             self.start_at = None
             self._do_autostart(lcu)
 
@@ -945,9 +968,30 @@ class AutoPickApp:
             return
         invite_ids = list(self.invite_ids)
         if invite_ids:
+            # Invite, then wait (over the next ticks) for them to actually join
+            # the lobby before starting matchmaking.
             if lcu.invite(invite_ids).ok:
-                self._post("log", f"{len(invite_ids)} Freund(e) eingeladen")
-            self.closing.wait(0.6)          # let invites register before searching
+                self._post("log",
+                           f"{len(invite_ids)} Freund(e) eingeladen – warte auf Beitritt …")
+            self.waiting_for = {"ids": set(invite_ids), "label": label,
+                                "deadline": time.time() + LOBBY_WAIT_TIMEOUT}
+        else:
+            self._start_search(lcu, label)
+
+    def _await_lobby(self, lcu):
+        wf = self.waiting_for
+        lobby = lcu.lobby() or {}
+        members = {m.get("summonerId") for m in (lobby.get("members") or [])}
+        if wf["ids"] <= members:
+            self.waiting_for = None
+            self._post("log", "Freunde beigetreten – starte Queue ✔")
+            self._start_search(lcu, wf["label"])
+        elif time.time() >= wf["deadline"]:
+            self.waiting_for = None
+            self._post("log", "Timeout – starte Queue ohne alle Freunde.")
+            self._start_search(lcu, wf["label"])
+
+    def _start_search(self, lcu, label):
         if lcu.start_matchmaking().ok:
             self._post("log", f"Queue gestartet: {label} ✔")
         else:

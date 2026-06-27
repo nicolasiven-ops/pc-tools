@@ -32,17 +32,19 @@ deren Einträge sich per ▲▼ umsortieren und mit ✕ entfernen lassen.
 
 Bringt dich automatisch in die Queue:
 
-- **Spielmodus** wählen (Normal Draft/Blind, Ranked Solo/Flex, ARAM, Quickplay).
+- **Spielmodus** wählen (Arena, Normal Draft/Blind, Ranked Solo/Flex, ARAM, Quickplay).
 - **Freunde einladen** (optional) – Auswahl aus der Freundesliste; Online-Status
   als Punkt, Anklicken (de)selektiert.
 - **Timer**: sofort, in X Minuten oder um eine Uhrzeit (HH:MM) – mit Countdown.
 - **Eingehende Einladungen automatisch annehmen** – zieht dich in die Lobby eines
   Freundes, ohne dass du klicken musst.
 
-Beim Auslösen erstellt das Tool die Lobby, lädt die gewählten Freunde ein und
-startet das Matchmaking. Das eigentliche Annehmen des Ready-Checks danach
-übernimmt – wie bisher – die Champ-Select-Automatik (Schalter „Queue automatisch
-annehmen", Tool per **Start** scharfstellen).
+Ein einziger Button steuert alles: Der große **Start** unten rechts stellt die
+Champ-Select-Automatik scharf *und* löst – sofern der Schalter „Beim Start
+automatisch in die Queue" an ist – den Auto-Start gemäß Timer aus. Dann erstellt
+das Tool die Lobby, lädt die gewählten Freunde ein und **wartet, bis sie der
+Lobby beigetreten sind**, bevor das Matchmaking startet (mit Timeout als
+Absicherung). **Stopp** bricht einen noch nicht gestarteten Auto-Start wieder ab.
 
 ## Funktionsweise (kurz)
 
