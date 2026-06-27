@@ -26,8 +26,15 @@ jobs:
       - name: Build PC Tools
         run: pyinstaller --onefile --noconsole --icon pc-tools.ico --name PC-Tools pc_tools.py
 
+      # --onedir (not --onefile) avoids the self-extracting stub that Windows
+      # Defender most often flags; --noupx and embedded version metadata cut the
+      # false-positive rate further. The folder is shipped as a .zip.
       - name: Build LoL Auto-Pick
-        run: pyinstaller --onefile --noconsole --icon lol-autopick/lol-autopick.ico --name LoL-AutoPick --paths lol-autopick lol-autopick/app.py
+        run: pyinstaller --onedir --noconsole --noupx --icon lol-autopick/lol-autopick.ico --version-file lol-autopick/version_info.txt --name LoL-AutoPick --paths lol-autopick lol-autopick/app.py
+
+      - name: Zip LoL Auto-Pick
+        shell: pwsh
+        run: Compress-Archive -Path dist/LoL-AutoPick -DestinationPath dist/LoL-AutoPick.zip -Force
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -35,7 +42,7 @@ jobs:
           name: executables
           path: |
             dist/PC-Tools.exe
-            dist/LoL-AutoPick.exe
+            dist/LoL-AutoPick.zip
 
       - name: Publish to "latest" release
         uses: softprops/action-gh-release@v2
@@ -44,4 +51,4 @@ jobs:
           name: Neueste Version
           files: |
             dist/PC-Tools.exe
-            dist/LoL-AutoPick.exe
+            dist/LoL-AutoPick.zip

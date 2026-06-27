@@ -52,10 +52,28 @@ Spielphase an. Mehr dazu in `lcu.py`.
 Aus dem Ordner `lol-autopick/`:
 
     pip install pyinstaller
-    pyinstaller --onefile --noconsole --icon lol-autopick.ico --name LoL-AutoPick app.py
+    pyinstaller --onedir --noconsole --noupx --icon lol-autopick.ico --version-file version_info.txt --name LoL-AutoPick app.py
 
-Die fertige Datei liegt danach unter `dist/LoL-AutoPick.exe`. (Im Repo baut das
-GitHub-Actions-Workflow die `.exe` automatisch und legt sie in die Releases.)
+Das fertige Paket liegt danach im Ordner `dist/LoL-AutoPick/` (Start: die
+`LoL-AutoPick.exe` darin). `--onedir` wird `--onefile` vorgezogen, weil die
+selbst-entpackende Einzel-Exe von Windows Defender oft fälschlich als Virus
+gemeldet wird. Im Repo baut das GitHub-Actions-Workflow das Paket automatisch
+und legt es als `LoL-AutoPick.zip` in die Releases.
+
+## „Defender meldet einen Virus" – Fehlalarm
+
+PyInstaller-Programme werden von Windows Defender häufig fälschlich als Malware
+erkannt (selbst-entpackender Loader, keine Signatur, plus das Auslesen des
+League-Prozesses für den Auth-Token). Der Code ist offen und wird per CI
+gebaut – es ist ein **False Positive**. Gegenmaßnahmen, von einfach nach gründlich:
+
+- Das `--onedir`-ZIP (wie oben) statt einer Einzel-Exe verwenden.
+- Die Datei in Defender als **Fehlalarm an Microsoft melden**
+  (https://www.microsoft.com/wdsi/filesubmission) – wird meist binnen Tagen
+  zentral entschärft.
+- Den Ordner in den **Defender-Ausschlüssen** eintragen.
+- 100 % sauber: **aus dem Quellcode starten** (`python app.py`) oder die `.exe`
+  mit einem (kostenpflichtigen) Zertifikat **signieren**.
 
 ## ⚠️ Wichtiger Hinweis (Terms of Service)
 

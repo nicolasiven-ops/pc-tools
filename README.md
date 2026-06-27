@@ -13,8 +13,11 @@ Kleine Windows-App mit ein paar praktischen PC-Steuerungen.
 Die fertige `.exe` wird bei jedem Push automatisch von GitHub gebaut:
 
 1. Auf der Repo-Seite rechts auf **Releases** klicken (Eintrag „Neueste Version“).
-2. `PC-Tools.exe` (bzw. `LoL-AutoPick.exe`) herunterladen.
-3. Doppelklick zum Starten — keine Installation nötig.
+2. Herunterladen:
+   - **`PC-Tools.exe`** — Doppelklick zum Starten, keine Installation nötig.
+   - **`LoL-AutoPick.zip`** — entpacken und in dem Ordner `LoL-AutoPick.exe` starten.
+     (Als Ordner-Paket statt Einzel-Exe, weil Windows Defender selbst-entpackende
+     Exes häufig fälschlich als Virus meldet.)
 
 > **Windows-Hinweis:** Beim ersten Start meldet sich evtl. „Windows hat Ihren PC geschützt“ (SmartScreen), weil die `.exe` nicht signiert ist. Auf **Weitere Informationen → Trotzdem ausführen** klicken. Das ist bei selbstgebauten Tools normal.
 
