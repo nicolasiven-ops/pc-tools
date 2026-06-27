@@ -35,8 +35,12 @@ LOCKFILE_CANDIDATES = [
 
 
 def _normalize(name):
-    """Lower-case and strip punctuation so 'Kai'Sa' and 'kaisa' match."""
-    return re.sub(r"[^a-z0-9]", "", name.lower())
+    """Lower-case and strip punctuation so 'Kai'Sa' and 'kaisa' match.
+
+    Null-safe: some champion-summary entries carry a null alias, and feeding
+    that to the matcher must not blow up the whole champion load.
+    """
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
 
 
 def _credentials_from_process():
@@ -111,7 +115,7 @@ class LCU:
         r = self.get("/lol-game-data/assets/v1/champion-summary.json")
         r.raise_for_status()
         champs = [
-            {"id": c["id"], "name": c["name"], "alias": c.get("alias", c["name"])}
+            {"id": c["id"], "name": c["name"], "alias": c.get("alias") or c["name"]}
             for c in r.json()
             if c.get("id", -1) >= 0                 # id -1 is the "None" placeholder
         ]

@@ -747,30 +747,37 @@ class AutoPickApp:
         self.events.put((kind, payload))
 
     def _drain_events(self):
-        try:
-            while True:
+        while True:
+            try:
                 kind, payload = self.events.get_nowait()
-                if kind == "log":
-                    self._set_status(payload)
-                elif kind == "status":
-                    state, text = payload
-                    self._set_pill(state)
-                    self._set_status(text)
-                elif kind == "phase":
-                    self._set_pill_phase(payload)
-                elif kind == "creds":
-                    self.creds = payload
-                elif kind == "champ_data":
-                    self._on_champ_data(payload)
-                elif kind == "friends":
-                    self._on_friends(payload)
-                elif kind == "icon":
-                    self._on_icon(payload)
-                elif kind == "notify":
-                    self._notify()
-        except queue.Empty:
-            pass
+            except queue.Empty:
+                break
+            # Never let one bad event kill the loop — surface it instead.
+            try:
+                self._handle_event(kind, payload)
+            except Exception as exc:                # noqa: BLE001 (defensive UI guard)
+                self._set_status(f"Fehler ({kind}): {exc}")
         self.root.after(120, self._drain_events)
+
+    def _handle_event(self, kind, payload):
+        if kind == "log":
+            self._set_status(payload)
+        elif kind == "status":
+            state, text = payload
+            self._set_pill(state)
+            self._set_status(text)
+        elif kind == "phase":
+            self._set_pill_phase(payload)
+        elif kind == "creds":
+            self.creds = payload
+        elif kind == "champ_data":
+            self._on_champ_data(payload)
+        elif kind == "friends":
+            self._on_friends(payload)
+        elif kind == "icon":
+            self._on_icon(payload)
+        elif kind == "notify":
+            self._notify()
 
     def _set_pill(self, state):
         colors = {"verbunden": (TEAL, WIN_BG), "warten": (ROW, MUTED),
@@ -789,6 +796,8 @@ class AutoPickApp:
             self.pill.configure(text=phase, background=GOLD, foreground=WIN_BG)
 
     def _on_champ_data(self, champs):
+        if not isinstance(champs, list) or not champs:
+            return
         self.champs = champs
         self.by_id = {c["id"]: c for c in champs}
         self.name_to_id = {}
