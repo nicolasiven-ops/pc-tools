@@ -37,15 +37,17 @@ POLL_SECONDS = 1.0
 THUMB = 34
 CONFIG_PATH = Path.home() / ".lol_autopick.json"
 
-# Game modes offered by the Auto-Start tab: (label, queueId).
+# Game modes offered by the Auto-Start tab: (label, preferred queueId, gameMode).
+# The queueId is only a hint — the real, currently-available id is resolved from
+# the client at start time (Arena's id in particular changes between patches).
 QUEUES = [
-    ("Arena", 1700),
-    ("Normal Draft", 400),
-    ("Blind Pick", 430),
-    ("Ranked Solo/Duo", 420),
-    ("Ranked Flex", 440),
-    ("ARAM", 450),
-    ("Quickplay", 490),
+    ("Arena", 1700, "CHERRY"),
+    ("Normal Draft", 400, "CLASSIC"),
+    ("Blind Pick", 430, "CLASSIC"),
+    ("Ranked Solo/Duo", 420, "CLASSIC"),
+    ("Ranked Flex", 440, "CLASSIC"),
+    ("ARAM", 450, "ARAM"),
+    ("Quickplay", 490, "CLASSIC"),
 ]
 
 # How long to wait for invited friends to join the lobby before starting anyway.
@@ -368,7 +370,7 @@ class AutoPickApp:
         for i in range(3):
             chips.columnconfigure(i, weight=1)
         self.queue_btns = {}
-        for i, (label, qid) in enumerate(QUEUES):
+        for i, (label, qid, _gm) in enumerate(QUEUES):
             b = ttk.Button(chips, text=label, style="Seg.TButton",
                            command=lambda q=qid: self._select_queue(q))
             b.grid(row=i // 3, column=i % 3, sticky="ew", padx=4, pady=4)
@@ -973,14 +975,19 @@ class AutoPickApp:
             self._do_autostart(lcu)
 
     def _do_autostart(self, lcu):
-        qid = self.queue_id
-        label = next((l for l, q in QUEUES if q == qid), str(qid))
+        label, want_id, gamemode = next(
+            ((l, q, gm) for l, q, gm in QUEUES if q == self.queue_id),
+            (str(self.queue_id), self.queue_id, None))
         try:
             phase = lcu.gameflow_phase()
         except requests.RequestException:
             phase = None
         if phase not in (None, "None", "Lobby"):
             self._post("log", f"Auto-Start übersprungen (Status: {phase}).")
+            return
+        qid = self._resolve_queue(lcu, want_id, gamemode)
+        if qid is None:
+            self._post("log", f"{label} ist gerade nicht verfügbar.")
             return
         r = lcu.create_lobby(qid)
         if not r.ok:
@@ -1019,6 +1026,34 @@ class AutoPickApp:
         else:
             self._post("log", f"Queue-Start ({label}) fehlgeschlagen "
                               f"[{r.status_code}]: {self._error_detail(r)}")
+
+    @staticmethod
+    def _resolve_queue(lcu, want_id, gamemode):
+        """Return a currently-available queue id for this mode, or None.
+
+        Prefer the configured id when it's available; otherwise fall back to any
+        available queue with the same game mode (Arena's id shifts between
+        patches, so a stale hard-coded id must not block the start).
+        """
+        try:
+            queues = lcu.available_queues()
+        except requests.RequestException:
+            return want_id
+        if not queues:                              # couldn't read them — just try
+            return want_id
+
+        def available(q):
+            return (q or {}).get("queueAvailability") == "Available"
+
+        by_id = {q.get("id"): q for q in queues}
+        if available(by_id.get(want_id)):
+            return want_id
+        if gamemode:
+            alt = next((q for q in queues
+                        if q.get("gameMode") == gamemode and available(q)), None)
+            if alt:
+                return alt.get("id")
+        return None
 
     @staticmethod
     def _error_detail(r):

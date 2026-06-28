@@ -166,6 +166,11 @@ class LCU:
         r = self.get("/lol-lobby/v2/lobby")
         return r.json() if r.ok else None
 
+    def available_queues(self):
+        """All game queues with their id, gameMode and queueAvailability."""
+        r = self.get("/lol-game-queues/v1/queues")
+        return r.json() if r.ok else []
+
     def create_lobby(self, queue_id):
         """Open (or switch to) a lobby for the given queue id."""
         return self.post("/lol-lobby/v2/lobby", json={"queueId": queue_id})
